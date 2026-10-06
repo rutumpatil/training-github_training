@@ -1,0 +1,87 @@
+name: Code Quality Report
+
+on:
+  workflow_run:
+    workflows: ["CI/CD - Build, Test & Lint"]
+    types: [completed]
+  schedule:
+    - cron: '0 9 * * 1'  # Every Monday at 9 AM UTC
+
+jobs:
+  quality-report:
+    name: Generate Quality Report
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.8'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install black flake8 mypy isort pytest pytest-cov
+
+      - name: Run linting analysis
+        id: lint
+        continue-on-error: true
+        run: |
+          echo "## Linting Analysis" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Flake8 Results" >> $GITHUB_STEP_SUMMARY
+          flake8 src/ tests/ --max-line-length=120 --statistics --format=json > flake8-report.json || true
+          echo "✅ Flake8 complete" >> $GITHUB_STEP_SUMMARY
+
+      - name: Run formatting check
+        id: format
+        continue-on-error: true
+        run: |
+          echo "### Black Formatting" >> $GITHUB_STEP_SUMMARY
+          black --check src/ tests/ --diff > black-report.txt 2>&1 || true
+          echo "✅ Black check complete" >> $GITHUB_STEP_SUMMARY
+
+      - name: Run type checking
+        id: typing
+        continue-on-error: true
+        run: |
+          echo "### Mypy Type Checking" >> $GITHUB_STEP_SUMMARY
+          mypy src/ --ignore-missing-imports --html mypy-report >> $GITHUB_STEP_SUMMARY || true
+
+      - name: Run tests with coverage
+        id: tests
+        continue-on-error: true
+        run: |
+          pytest tests/ -v --cov=src --cov-report=term-missing --cov-report=json --tb=short
+
+      - name: Archive quality reports
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: quality-reports
+          path: |
+            flake8-report.json
+            black-report.txt
+            mypy-report/
+            .coverage
+          retention-days: 30
+
+      - name: Create job summary
+        if: always()
+        run: |
+          echo "## 📊 Code Quality Report" >> $GITHUB_STEP_SUMMARY
+          echo "Generated: $(date)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Quality Checks" >> $GITHUB_STEP_SUMMARY
+          echo "- 🔍 Linting: ${{ steps.lint.outcome }}" >> $GITHUB_STEP_SUMMARY
+          echo "- 🎨 Formatting: ${{ steps.format.outcome }}" >> $GITHUB_STEP_SUMMARY
+          echo "- 📝 Type Checking: ${{ steps.typing.outcome }}" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Tests: ${{ steps.tests.outcome }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "📌 See artifacts for detailed reports" >> $GITHUB_STEP_SUMMARY
